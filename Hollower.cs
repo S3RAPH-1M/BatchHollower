@@ -1,4 +1,4 @@
-using Mono.Cecil;
+﻿using Mono.Cecil;
 using Mono.Cecil.Rocks;
 
 namespace Seion.BatchHollower
@@ -77,17 +77,51 @@ namespace Seion.BatchHollower
         public void HollowMethod(MethodDefinition method)
         {
             if (method == null)
-            {
                 return;
-            }
 
             if (!method.HasBody)
-            {
-                return;
-            }
+                method.Body = new Mono.Cecil.Cil.MethodBody(method);
 
+            // Make sure method is not extern
+            method.IsRuntime = false;
+            method.IsInternalCall = false;
+            method.ImplAttributes &= ~MethodImplAttributes.InternalCall;
+
+            var il = method.Body.GetILProcessor();
             method.Body.Instructions.Clear();
             method.Body.Variables.Clear();
+
+            // Insert a default return depending on return type
+            if (method.ReturnType.FullName == "System.Void")
+            {
+                // void --> just return
+                il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Ret));
+            }
+            else
+            {
+                // non-void --> load default(T) then return
+
+                var returnType = method.ReturnType;
+
+                if (returnType.IsValueType || returnType.IsGenericParameter)
+                {
+                    // Create a local variable of return type
+                    var varDef = new Mono.Cecil.Cil.VariableDefinition(returnType);
+                    method.Body.Variables.Add(varDef);
+
+                    il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Ldloca, varDef));
+                    il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Initobj, returnType));
+                    il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Ldloc, varDef));
+                }
+                else
+                {
+                    // reference type --> load null
+                    il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Ldnull));
+                }
+
+                il.Append(il.Create(Mono.Cecil.Cil.OpCodes.Ret));
+            }
         }
+
     }
 }
